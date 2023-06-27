@@ -188,6 +188,58 @@ void consultarRegistro(int rg) {
     pthread_mutex_unlock(&tabelaHashMutex);
 }
 
+// Função para deletar um registro na tabelaHash
+void deletarRegistro(int rg) {
+    int chave = gerarChaveHash(rg);
+
+    pthread_mutex_lock(&tabelaHashMutex);
+
+    if (tabelaHash[chave - 1].registro.rg == rg) {
+        tabelaHash[chave - 1].registro.rg = -1;
+    } else {
+        int fim = tabelaRoteamento[processoID - 1].fim;
+        int posicao = chave;
+        for (int i = chave; i <= fim; i++) {
+            posicao = i;
+            if (tabelaHash[posicao].registro.rg == rg) break;
+        }
+
+        if (posicao != -1 && tabelaHash[posicao].registro.rg == rg) {
+            tabelaHash[posicao].registro.rg = -1;
+        } else {
+            printf("Registro não encontrado.\n");
+        }
+    }
+
+    pthread_mutex_unlock(&tabelaHashMutex);
+}
+
+// Função para alterar um registro na tabelaHash
+void alterarRegistro(int rg, char* nome) {
+    int chave = gerarChaveHash(rg);
+
+    pthread_mutex_lock(&tabelaHashMutex);
+
+    if (tabelaHash[chave - 1].registro.rg == rg) {
+        strcpy(tabelaHash[chave - 1].registro.nome, nome);
+    } else {
+        int fim = tabelaRoteamento[processoID - 1].fim;
+        int posicao = chave;
+        for (int i = chave; i <= fim; i++) {
+            posicao = i;
+            if (tabelaHash[posicao].registro.rg == rg) break;
+        }
+
+        if (posicao != -1 && tabelaHash[posicao].registro.rg == rg) {
+            strcpy(tabelaHash[posicao].registro.nome, nome);
+        } else {
+            printf("Registro não encontrado.\n");
+        }
+    }
+
+    pthread_mutex_unlock(&tabelaHashMutex);
+}
+
 void inicializarListaMensagens() {
     listaMensagens.tamanho = 0;
     pthread_mutex_init(&listaMensagensMutex, NULL);
@@ -321,8 +373,25 @@ void* servidor(void* arg) {
                 // Adicionar a mensagem na lista de mensagens
                 adicionarMensagemLista(rg, 'Q', nome);
             }
-        }
-        else {
+        } else if (buffer[0] == 'D' && bytesRecebidos > 3) {
+            int rg;
+            char nome[100];
+            char operacao;
+
+            // Extrair as informações da mensagem
+            sscanf(buffer, "%c|%d|%99[^\n]", &operacao, &rg, nome);
+
+            deletarRegistro(rg);
+        } else if (buffer[0] == 'A' && bytesRecebidos > 3) {
+            int rg;
+            char nome[100];
+            char operacao;
+
+            // Extrair as informações da mensagem
+            sscanf(buffer, "%c|%d|%99[^\n]", &operacao, &rg, nome);
+
+            alterarRegistro(rg, nome);
+        } else {
             int rg;
             char nome[100];
             char operacao;
@@ -395,9 +464,11 @@ void* terminal(void* arg) {
         printf("\n---------- MENU ----------\n");
         printf("1. Consultar registro por RG\n");
         printf("2. Cadastrar novo registro\n");
-        printf("3. Exibir pendentes consulta\n");
-        printf("4. Registros locais\n");
-        printf("5. Sair\n");
+        printf("3. Alterar registro por RG\n");
+        printf("4. Excluir registro por RG\n");
+        printf("5. Exibir pendentes consulta\n");
+        printf("6. Exibir registros locais\n");
+        printf("7. Sair\n");
         printf("\n--------------------------\n");
         printf("Escolha uma opção: ");
 
@@ -450,9 +521,9 @@ void* terminal(void* arg) {
                 // ***Adicionar na fila de saida para ser enviada pela threado cliente
                 adicionarSaidaLista(rg, 'C', nome, processo);
             }
-        } else if (opcao == 3) {
+        } else if (opcao == 5) {
             exibirMensagensLista();
-        } else if (opcao == 4) {
+        } else if (opcao == 6) {
             int inicio = tabelaRoteamento[processoID -1].inicio - 1;
             int fim = tabelaRoteamento[processoID -1].fim;
             printf("\nTodos os registros locais:\n");
@@ -461,7 +532,52 @@ void* terminal(void* arg) {
                     printf("%i - Rg: %i Nome: %s\n", i, tabelaHash[i].registro.rg, tabelaHash[i].registro.nome);
             }
             printf("\n--------------------------\n");
-        } else if (opcao == 5) {
+        } else if (opcao == 3) {
+            int rg;
+            char nome[100];
+
+            printf("Digite o RG: ");
+            scanf("%d", &rg);
+            printf("Digite o nome: ");
+            scanf("%s", nome);
+
+            // Verificar se o RG pertence ao range de gerenciamento do processo atual
+            int chave = gerarChaveHash(rg);
+            bool rgLocal = false;
+            if (chave >= tabelaRoteamento[processoID - 1].inicio && chave <= tabelaRoteamento[processoID - 1].fim) {
+                rgLocal = true;
+            }
+
+            if (rgLocal) {
+                alterarRegistro(rg, nome);
+            } else {
+                int processo = idProcessoRecebedor();
+                // ***Adicionar na fila de saida para ser enviada pela threado cliente
+                adicionarSaidaLista(rg, 'A', nome, processo);
+            }
+        } else if (opcao == 4) {
+            int rg;
+            printf("Digite o RG: ");
+            scanf("%d", &rg);
+
+            // Verificar se o RG pertence ao range de gerenciamento do processo atual
+            int chave = gerarChaveHash(rg);
+            bool rgLocal = false;
+            if (chave >= tabelaRoteamento[processoID - 1].inicio && chave <= tabelaRoteamento[processoID - 1].fim) {
+                rgLocal = true;
+            }
+
+            if (rgLocal) {
+                deletarRegistro(rg);
+            } else {
+                int processo = idProcessoRecebedor();
+                char nome[100];
+                sprintf(nome, "%d", processoID);
+                // ***Adicionar na fila de saida para ser enviada pela threado cliente
+                adicionarSaidaLista(rg, 'D', nome, processo);
+            }
+        } else if (opcao == 7) {
+            printf("Saindo...\n");
             break;
         } else {
             printf("Opção inválida. Tente novamente.\n");
